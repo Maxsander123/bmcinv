@@ -83,7 +83,14 @@ func exportCSV(servers []models.Server) error {
 	var allMemory []memoryExport
 	for _, s := range servers {
 		for _, m := range s.Memory {
-			allMemory = append(allMemory, memoryExport{Memory: m, ServerIP: s.IP})
+			allMemory = append(allMemory, memoryExport{
+				Memory:         m,
+				ServerIP:       s.IP,
+				ServerSerial:   s.ChassisSerial,
+				ServerVendor:   s.Vendor,
+				ServerModel:    s.Model,
+				ServerHostname: s.Hostname,
+			})
 		}
 	}
 	if len(allMemory) > 0 {
@@ -98,7 +105,14 @@ func exportCSV(servers []models.Server) error {
 	var allStorage []storageExport
 	for _, s := range servers {
 		for _, st := range s.Storage {
-			allStorage = append(allStorage, storageExport{Storage: st, ServerIP: s.IP})
+			allStorage = append(allStorage, storageExport{
+				Storage:        st,
+				ServerIP:       s.IP,
+				ServerSerial:   s.ChassisSerial,
+				ServerVendor:   s.Vendor,
+				ServerModel:    s.Model,
+				ServerHostname: s.Hostname,
+			})
 		}
 	}
 	if len(allStorage) > 0 {
@@ -113,7 +127,14 @@ func exportCSV(servers []models.Server) error {
 	var allNetworks []networkExport
 	for _, s := range servers {
 		for _, n := range s.Networks {
-			allNetworks = append(allNetworks, networkExport{Network: n, ServerIP: s.IP})
+			allNetworks = append(allNetworks, networkExport{
+				Network:        n,
+				ServerIP:       s.IP,
+				ServerSerial:   s.ChassisSerial,
+				ServerVendor:   s.Vendor,
+				ServerModel:    s.Model,
+				ServerHostname: s.Hostname,
+			})
 		}
 	}
 	if len(allNetworks) > 0 {
@@ -129,17 +150,29 @@ func exportCSV(servers []models.Server) error {
 
 type memoryExport struct {
 	models.Memory
-	ServerIP string
+	ServerIP       string
+	ServerSerial   string
+	ServerVendor   string
+	ServerModel    string
+	ServerHostname string
 }
 
 type storageExport struct {
 	models.Storage
-	ServerIP string
+	ServerIP       string
+	ServerSerial   string
+	ServerVendor   string
+	ServerModel    string
+	ServerHostname string
 }
 
 type networkExport struct {
 	models.Network
-	ServerIP string
+	ServerIP       string
+	ServerSerial   string
+	ServerVendor   string
+	ServerModel    string
+	ServerHostname string
 }
 
 func writeServersCSV(filename string, servers []models.Server) error {
@@ -180,12 +213,16 @@ func writeMemoryCSV(filename string, memory []memoryExport) error {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	// Header
-	w.Write([]string{"ServerIP", "Slot", "CapacityGB", "Speed", "Type", "Manufacturer", "PartNumber", "SerialNumber", "Health"})
+	// Header - with parent server info
+	w.Write([]string{"ServerIP", "ServerSerial", "ServerVendor", "ServerModel", "ServerHostname", "Slot", "CapacityGB", "Speed", "Type", "Manufacturer", "PartNumber", "SerialNumber", "Health"})
 
 	for _, m := range memory {
 		w.Write([]string{
 			m.ServerIP,
+			m.ServerSerial,
+			m.ServerVendor,
+			m.ServerModel,
+			m.ServerHostname,
 			m.Slot,
 			strconv.Itoa(m.CapacityGB),
 			strconv.Itoa(m.Speed),
@@ -209,8 +246,8 @@ func writeStorageCSV(filename string, storage []storageExport) error {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	// Header
-	w.Write([]string{"ServerIP", "Slot", "MediaType", "Protocol", "CapacityGB", "Manufacturer", "Model", "SerialNumber", "FirmwareRev", "Health", "PredFailure"})
+	// Header - with parent server info
+	w.Write([]string{"ServerIP", "ServerSerial", "ServerVendor", "ServerModel", "ServerHostname", "Slot", "MediaType", "Protocol", "CapacityGB", "Manufacturer", "Model", "SerialNumber", "FirmwareRev", "Health", "PredFailure"})
 
 	for _, s := range storage {
 		predFailure := "false"
@@ -219,6 +256,10 @@ func writeStorageCSV(filename string, storage []storageExport) error {
 		}
 		w.Write([]string{
 			s.ServerIP,
+			s.ServerSerial,
+			s.ServerVendor,
+			s.ServerModel,
+			s.ServerHostname,
 			s.Slot,
 			s.MediaType,
 			s.Protocol,
@@ -244,12 +285,16 @@ func writeNetworksCSV(filename string, networks []networkExport) error {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
-	// Header
-	w.Write([]string{"ServerIP", "Port", "MacAddress", "IPAddress", "LinkStatus", "LinkSpeedMbps", "Manufacturer", "Model", "FirmwareRev"})
+	// Header - with parent server info
+	w.Write([]string{"ServerIP", "ServerSerial", "ServerVendor", "ServerModel", "ServerHostname", "Port", "MacAddress", "IPAddress", "LinkStatus", "LinkSpeedMbps", "Manufacturer", "Model", "FirmwareRev"})
 
 	for _, n := range networks {
 		w.Write([]string{
 			n.ServerIP,
+			n.ServerSerial,
+			n.ServerVendor,
+			n.ServerModel,
+			n.ServerHostname,
 			n.Port,
 			n.MacAddress,
 			n.IPAddress,

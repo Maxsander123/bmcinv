@@ -1,0 +1,185 @@
+.TH BMCINV 1 "March 2026" "bmcinv 1.0.0" "User Commands"
+.SH NAME
+bmcinv \- BMC Inventory Tool for datacenter hardware inventory via Redfish API
+.SH SYNOPSIS
+.B bmcinv
+[\fICOMMAND\fR] [\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B bmcinv
+is a read-only hardware inventory tool that queries servers via their BMC interfaces
+(Dell iDRAC, HPE iLO, IPMI) using the Redfish API. It caches detailed hardware information
+in a local SQLite database, enabling fast searches across serial numbers, MAC addresses,
+and other component identifiers.
+.PP
+The tool supports smart credential management, allowing different passwords for different
+BMC types in datacenter environments.
+.SH COMMANDS
+.TP
+.B scan \fI<cidr|ip>\fR
+Scan BMC endpoints and collect hardware inventory. Supports single IPs or CIDR ranges.
+.TP
+.B find \fI<string>\fR
+Search for a string across all hardware components (servers, memory, storage, networks).
+Supports MAC addresses, serial numbers, hostnames, and manufacturer names.
+.TP
+.B export
+Export inventory data to CSV or JSON format.
+.TP
+.B status
+Show database and configuration status, including credential overview and statistics.
+.TP
+.B help
+Display help information about any command.
+.TP
+.B completion
+Generate shell autocompletion scripts for bash, zsh, fish, or powershell.
+.SH OPTIONS
+.SS Global Options
+.TP
+.BR \-\-config " " \fIfile\fR
+Use alternate config file (default: ~/.bmcinv/config.yaml)
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose output
+.TP
+.BR \-h ", " \-\-help
+Show help message
+.SS Scan Options
+.TP
+.BR \-w ", " \-\-workers " " \fIn\fR
+Number of parallel workers (default from config, typically 10)
+.TP
+.BR \-t ", " \-\-timeout " " \fIseconds\fR
+Timeout per host in seconds
+.TP
+.BR \-e ", " \-\-export
+Export to CSV/JSON after scan (command chaining)
+.TP
+.BR \-o ", " \-\-export\-dir " " \fIdir\fR
+Export output directory (default: current directory)
+.TP
+.BR \-F ", " \-\-export\-format " " \fIformat\fR
+Export format: csv or json (default: csv)
+.SS Find Options
+.TP
+.BR \-e ", " \-\-exact
+Exact match only (no wildcards)
+.TP
+.BR \-l ", " \-\-limit " " \fIn\fR
+Maximum results per table (default: 100)
+.TP
+.BR \-T ", " \-\-type " " \fItype\fR
+Limit search to type: server, memory, storage, or network
+.SS Export Options
+.TP
+.BR \-f ", " \-\-format " " \fIformat\fR
+Output format: csv or json (default: csv)
+.TP
+.BR \-o ", " \-\-output " " \fIdir\fR
+Output directory or file
+.SH CONFIGURATION
+The configuration file is located at \fB~/.bmcinv/config.yaml\fR and is created
+automatically on first run. It supports different credentials per BMC type:
+.PP
+.RS
+.nf
+credentials:
+  idrac:
+    username: root
+    password: calvin
+  ilo:
+    username: Administrator
+    password: your-password
+  ipmi:
+    username: ADMIN
+    password: ADMIN
+
+scan:
+  workers: 10
+  timeout_secs: 30
+  retry_attempts: 2
+
+database:
+  path: ~/.bmcinv/inventory.db
+.fi
+.RE
+.SH EXAMPLES
+.TP
+Scan a single server:
+.B bmcinv scan 192.168.1.100
+.TP
+Scan an entire subnet:
+.B bmcinv scan 192.168.1.0/24
+.TP
+Scan and export to CSV:
+.B bmcinv scan 10.0.0.0/24 --export -o ~/backup
+.TP
+Scan and export as JSON:
+.B bmcinv scan 10.0.0.0/24 -e -F json
+.TP
+Find by MAC address:
+.B bmcinv find 00:1B:21:AB:CD:EF
+.TP
+Find by RAM serial number:
+.B bmcinv find MEM12345678
+.TP
+Find all Samsung memory:
+.B bmcinv find Samsung --type memory
+.TP
+Find all Dell servers:
+.B bmcinv find "Dell Inc."
+.TP
+Export all data to CSV:
+.B bmcinv export -o ~/inventory
+.TP
+Export to JSON:
+.B bmcinv export -f json -o ~/inventory.json
+.TP
+Show inventory status:
+.B bmcinv status
+.TP
+Enable bash completion:
+.B bmcinv completion bash > /etc/bash_completion.d/bmcinv
+.SH FILES
+.TP
+.I ~/.bmcinv/config.yaml
+Configuration file with credentials and settings
+.TP
+.I ~/.bmcinv/inventory.db
+SQLite database containing cached inventory data
+.SH DATABASE SCHEMA
+The tool maintains the following tables:
+.TP
+.B servers
+IP, vendor, model, chassis serial, BIOS version, hostname, scan timestamp
+.TP
+.B memory
+Slot, capacity, speed, type, manufacturer, part number, serial number, health
+.TP
+.B storage
+Slot, media type, protocol, capacity, manufacturer, model, serial number, health
+.TP
+.B networks
+Port, MAC address, IP address, link status, speed, manufacturer, model
+.SH EXIT STATUS
+.TP
+.B 0
+Success
+.TP
+.B 1
+General error (invalid arguments, scan failure, etc.)
+.SH SECURITY
+Credentials are stored in plain text in the config file. Ensure appropriate
+file permissions (600) are set on ~/.bmcinv/config.yaml.
+.PP
+The tool only performs read operations on BMC interfaces. It does not modify
+server configurations.
+.SH BUGS
+Report bugs at: https://github.com/Maxsander123/bmcinv/issues
+.SH AUTHOR
+Written by Maxsander123
+.SH SEE ALSO
+.BR ipmitool (1),
+.BR racadm (1)
+.PP
+Project homepage: https://github.com/Maxsander123/bmcinv

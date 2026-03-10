@@ -1,0 +1,18 @@
+# Binaries
+bmcinv
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Config (may contain passwords)
+config.yaml

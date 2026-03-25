@@ -5,6 +5,21 @@
 
 Ein Read-Only Hardware-Inventarisierungs-Tool für Rechenzentren, das via Redfish API (iDRAC, iLO, IPMI) Server abfragt und Hardware-Details in einer lokalen SQLite-Datenbank cached.
 
+## Was macht dieses Programm?
+
+**bmcinv** ist ein Kommandozeilen-Tool zur automatischen Hardware-Inventarisierung von Servern im Rechenzentrum.
+
+Es verbindet sich **nur lesend** über das Baseboard Management Controller (BMC) Interface – also iDRAC (Dell), iLO (HPE) oder IPMI – mit Servern und liest über die standardisierte **Redfish API** deren Hardware-Details aus:
+
+- **Server-Grunddaten**: Hersteller, Modell, Seriennummer, BIOS-Version, Hostname
+- **Arbeitsspeicher (RAM)**: Alle eingebauten DIMMs mit Slot, Kapazität, Taktrate, Typ, Hersteller, Teilenummer, Seriennummer und Health-Status
+- **Speichermedien (Disks)**: Alle Festplatten/SSDs mit Typ, Protokoll, Kapazität, Hersteller, Modell, Seriennummer und Health-Status
+- **Netzwerkkarten (NICs)**: Alle Ports mit MAC-Adresse, IP-Adresse, Link-Status, Geschwindigkeit, Hersteller und Modell
+
+Die gesammelten Daten werden in einer **lokalen SQLite-Datenbank** gespeichert, sodass Suchen (z. B. nach einer MAC-Adresse oder RAM-Seriennummer) sofort – ohne erneuten Netzwerkzugriff – funktionieren.
+
+> **English summary:** `bmcinv` is a read-only datacenter hardware inventory tool. It connects to server BMC interfaces (Dell iDRAC, HPE iLO, IPMI) via the Redfish API, collects detailed hardware information (RAM, storage, network cards), caches it in a local SQLite database, and lets you search across all components instantly.
+
 ## Features
 
 - 🔍 **Schnelle Suche** - Finde Server anhand von RAM-Seriennummern, MAC-Adressen, Disk-Serials

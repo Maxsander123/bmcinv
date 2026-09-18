@@ -42,8 +42,6 @@ func GlobalFind(query string, opts SearchOptions) ([]models.SearchResult, error)
 		return nil, fmt.Errorf("search query cannot be empty")
 	}
 
-	db := database.GetDB()
-	
 	// Prepare search pattern
 	searchPattern := prepareSearchPattern(query, opts)
 	
@@ -58,7 +56,7 @@ func GlobalFind(query string, opts SearchOptions) ([]models.SearchResult, error)
 	// Search Servers
 	go func() {
 		defer wg.Done()
-		results, err := searchServers(db, searchPattern, opts)
+		results, err := searchServers(searchPattern, opts)
 		if err != nil {
 			errChan <- fmt.Errorf("server search failed: %w", err)
 			return
@@ -69,7 +67,7 @@ func GlobalFind(query string, opts SearchOptions) ([]models.SearchResult, error)
 	// Search Memory
 	go func() {
 		defer wg.Done()
-		results, err := searchMemory(db, searchPattern, opts)
+		results, err := searchMemory(searchPattern, opts)
 		if err != nil {
 			errChan <- fmt.Errorf("memory search failed: %w", err)
 			return
@@ -80,7 +78,7 @@ func GlobalFind(query string, opts SearchOptions) ([]models.SearchResult, error)
 	// Search Storage
 	go func() {
 		defer wg.Done()
-		results, err := searchStorage(db, searchPattern, opts)
+		results, err := searchStorage(searchPattern, opts)
 		if err != nil {
 			errChan <- fmt.Errorf("storage search failed: %w", err)
 			return
@@ -91,7 +89,7 @@ func GlobalFind(query string, opts SearchOptions) ([]models.SearchResult, error)
 	// Search Networks
 	go func() {
 		defer wg.Done()
-		results, err := searchNetworks(db, searchPattern, opts)
+		results, err := searchNetworks(searchPattern, opts)
 		if err != nil {
 			errChan <- fmt.Errorf("network search failed: %w", err)
 			return
@@ -139,21 +137,19 @@ func prepareSearchPattern(query string, opts SearchOptions) string {
 	return "%" + query + "%"
 }
 
-// normalizeMAC handles different MAC address formats
+// normalizeMAC handles different MAC address formats and normalises to uppercase AA:BB:CC:DD:EE:FF.
 func normalizeMAC(query string) string {
-	// Detect if this looks like a MAC address
 	cleaned := strings.ReplaceAll(query, ":", "")
 	cleaned = strings.ReplaceAll(cleaned, "-", "")
 	cleaned = strings.ReplaceAll(cleaned, ".", "")
-	
-	// If it's a 12-char hex string, it's probably a MAC
+
 	if len(cleaned) == 12 && isHexString(cleaned) {
-		// Convert to standard format AA:BB:CC:DD:EE:FF
+		upper := strings.ToUpper(cleaned)
 		return fmt.Sprintf("%s:%s:%s:%s:%s:%s",
-			cleaned[0:2], cleaned[2:4], cleaned[4:6],
-			cleaned[6:8], cleaned[8:10], cleaned[10:12])
+			upper[0:2], upper[2:4], upper[4:6],
+			upper[6:8], upper[8:10], upper[10:12])
 	}
-	
+
 	return query
 }
 
@@ -168,7 +164,7 @@ func isHexString(s string) bool {
 }
 
 // searchServers searches the servers table
-func searchServers(_ interface{}, pattern string, opts SearchOptions) ([]models.SearchResult, error) {
+func searchServers(pattern string, opts SearchOptions) ([]models.SearchResult, error) {
 	db := database.GetDB()
 	var results []models.SearchResult
 	
@@ -204,7 +200,7 @@ func searchServers(_ interface{}, pattern string, opts SearchOptions) ([]models.
 }
 
 // searchMemory searches the memory table with server JOIN
-func searchMemory(_ interface{}, pattern string, opts SearchOptions) ([]models.SearchResult, error) {
+func searchMemory(pattern string, opts SearchOptions) ([]models.SearchResult, error) {
 	db := database.GetDB()
 	var results []models.SearchResult
 
@@ -248,7 +244,7 @@ func searchMemory(_ interface{}, pattern string, opts SearchOptions) ([]models.S
 }
 
 // searchStorage searches the storage table with server JOIN
-func searchStorage(_ interface{}, pattern string, opts SearchOptions) ([]models.SearchResult, error) {
+func searchStorage(pattern string, opts SearchOptions) ([]models.SearchResult, error) {
 	db := database.GetDB()
 	var results []models.SearchResult
 
@@ -292,7 +288,7 @@ func searchStorage(_ interface{}, pattern string, opts SearchOptions) ([]models.
 }
 
 // searchNetworks searches the networks table with server JOIN
-func searchNetworks(_ interface{}, pattern string, opts SearchOptions) ([]models.SearchResult, error) {
+func searchNetworks(pattern string, opts SearchOptions) ([]models.SearchResult, error) {
 	db := database.GetDB()
 	var results []models.SearchResult
 

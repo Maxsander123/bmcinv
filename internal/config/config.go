@@ -2,12 +2,17 @@
 // Design Decision: Das Config-System nutzt eine hierarchische YAML-Struktur, die verschiedene
 // BMC-Typen (iDRAC, iLO, IPMI) mit separaten Credentials unterstützt. Dies ist essentiell
 // für Rechenzentren, wo unterschiedliche Hardware-Generationen verschiedene Passwörter haben.
+//
+// Passwords can be supplied via environment variables instead of the config file:
+//
+//	BMCINV_IDRAC_PASSWORD, BMCINV_ILO_PASSWORD, BMCINV_IPMI_PASSWORD
 package config
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -30,9 +35,10 @@ type Credential struct {
 
 // ScanConfig holds scanner-specific settings
 type ScanConfig struct {
-	Workers       int `mapstructure:"workers"`
-	TimeoutSecs   int `mapstructure:"timeout_secs"`
-	RetryAttempts int `mapstructure:"retry_attempts"`
+	Workers       int  `mapstructure:"workers"`
+	TimeoutSecs   int  `mapstructure:"timeout_secs"`
+	RetryAttempts int  `mapstructure:"retry_attempts"`
+	TLSSkipVerify bool `mapstructure:"tls_skip_verify"`
 }
 
 // Config is the root configuration structure that Viper deserializes into.
@@ -74,32 +80,27 @@ func DatabasePath() string {
 }
 
 // InitConfig initializes Viper and loads the configuration.
-// This is called early in the CLI lifecycle (e.g., in rootCmd.PersistentPreRun).
+// Called early in the CLI lifecycle (rootCmd.PersistentPreRunE).
 func InitConfig() error {
 	configDir := ConfigDir()
 
-	// Ensure config directory exists
 	if err := os.MkdirAll(configDir, 0750); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Setup Viper
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(configDir)
 	viper.AddConfigPath(".")
 
-	// Set sensible defaults
 	setDefaults()
+	bindEnvVars()
 
-	// Try to read config file (create if not exists)
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Create default config file
 			if err := createDefaultConfig(); err != nil {
 				return fmt.Errorf("failed to create default config: %w", err)
 			}
-			// Re-read the newly created config
 			if err := viper.ReadInConfig(); err != nil {
 				return fmt.Errorf("failed to read config after creation: %w", err)
 			}
@@ -108,18 +109,19 @@ func InitConfig() error {
 		}
 	}
 
-	// Unmarshal into struct
 	AppConfig = &Config{}
 	if err := viper.Unmarshal(AppConfig); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+
+	// Apply environment variable overrides for passwords after unmarshal
+	applyEnvPasswords()
 
 	return nil
 }
 
 // setDefaults configures Viper with sensible default values
 func setDefaults() {
-	// Default credentials (should be overridden in config)
 	viper.SetDefault("credentials.idrac.username", "root")
 	viper.SetDefault("credentials.idrac.password", "calvin")
 	viper.SetDefault("credentials.ilo.username", "Administrator")
@@ -127,46 +129,95 @@ func setDefaults() {
 	viper.SetDefault("credentials.ipmi.username", "ADMIN")
 	viper.SetDefault("credentials.ipmi.password", "ADMIN")
 
-	// Database defaults
 	viper.SetDefault("database.path", filepath.Join(ConfigDir(), "inventory.db"))
 
-	// Scan defaults
 	viper.SetDefault("scan.workers", 10)
 	viper.SetDefault("scan.timeout_secs", 30)
 	viper.SetDefault("scan.retry_attempts", 2)
+	// Default true: BMCs in data centers almost always use self-signed certificates.
+	viper.SetDefault("scan.tls_skip_verify", true)
 }
 
-// createDefaultConfig writes a template YAML config file
+// bindEnvVars wires environment variables to Viper keys.
+// Viper's AutomaticEnv does not resolve nested keys reliably, so we bind explicitly.
+func bindEnvVars() {
+	viper.SetEnvPrefix("BMCINV")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
+
+	_ = viper.BindEnv("credentials.idrac.password", "BMCINV_IDRAC_PASSWORD")
+	_ = viper.BindEnv("credentials.ilo.password", "BMCINV_ILO_PASSWORD")
+	_ = viper.BindEnv("credentials.ipmi.password", "BMCINV_IPMI_PASSWORD")
+	_ = viper.BindEnv("credentials.idrac.username", "BMCINV_IDRAC_USERNAME")
+	_ = viper.BindEnv("credentials.ilo.username", "BMCINV_ILO_USERNAME")
+	_ = viper.BindEnv("credentials.ipmi.username", "BMCINV_IPMI_USERNAME")
+}
+
+// applyEnvPasswords overrides credential passwords from environment variables
+// after Viper has unmarshalled the config struct. This is needed because Viper's
+// BindEnv for nested map keys is not reliably picked up by Unmarshal.
+func applyEnvPasswords() {
+	if AppConfig == nil {
+		return
+	}
+	if AppConfig.Credentials == nil {
+		AppConfig.Credentials = make(map[string]Credential)
+	}
+
+	envMap := map[string][2]string{
+		"idrac": {"BMCINV_IDRAC_USERNAME", "BMCINV_IDRAC_PASSWORD"},
+		"ilo":   {"BMCINV_ILO_USERNAME", "BMCINV_ILO_PASSWORD"},
+		"ipmi":  {"BMCINV_IPMI_USERNAME", "BMCINV_IPMI_PASSWORD"},
+	}
+
+	for key, vars := range envMap {
+		cred := AppConfig.Credentials[key]
+		if v := os.Getenv(vars[0]); v != "" {
+			cred.Username = v
+		}
+		if v := os.Getenv(vars[1]); v != "" {
+			cred.Password = v
+		}
+		AppConfig.Credentials[key] = cred
+	}
+}
+
+// createDefaultConfig writes a template YAML config file with usage hints
 func createDefaultConfig() error {
 	configContent := `# BMC Inventory Configuration
-# Credentials for different BMC types - customize per your environment
+#
+# SECURITY: Store passwords via environment variables instead of this file:
+#   export BMCINV_IDRAC_PASSWORD="yourpassword"
+#   export BMCINV_ILO_PASSWORD="yourpassword"
+#   export BMCINV_IPMI_PASSWORD="yourpassword"
+
 credentials:
   idrac:
     username: root
-    password: calvin
+    password: ""  # prefer BMCINV_IDRAC_PASSWORD env var
   ilo:
     username: Administrator
-    password: ""
+    password: ""  # prefer BMCINV_ILO_PASSWORD env var
   ipmi:
     username: ADMIN
-    password: ADMIN
+    password: ""  # prefer BMCINV_IPMI_PASSWORD env var
 
-# Database settings
 database:
   path: ~/.bmcinv/inventory.db
 
-# Scanner settings
 scan:
   workers: 10
   timeout_secs: 30
   retry_attempts: 2
+  # BMCs in data centers typically use self-signed TLS certificates.
+  # Set to false only if your BMCs have trusted certificates.
+  tls_skip_verify: true
 `
 	return os.WriteFile(ConfigPath(), []byte(configContent), 0600)
 }
 
 // GetCredential retrieves credentials for a specific BMC type.
-// This is the core of the "Smart Credential Management" - the scanner
-// first detects the BMC type, then calls this function to get matching credentials.
+// Returns an error if the BMC type is unconfigured or has no username.
 func GetCredential(bmcType BMCType) (Credential, error) {
 	if AppConfig == nil {
 		return Credential{}, fmt.Errorf("configuration not initialized")
@@ -177,11 +228,9 @@ func GetCredential(bmcType BMCType) (Credential, error) {
 	if !exists {
 		return Credential{}, fmt.Errorf("no credentials configured for BMC type: %s", bmcType)
 	}
-
 	if cred.Username == "" {
 		return Credential{}, fmt.Errorf("username not configured for BMC type: %s", bmcType)
 	}
-
 	return cred, nil
 }
 
@@ -192,6 +241,7 @@ func GetScanConfig() ScanConfig {
 			Workers:       10,
 			TimeoutSecs:   30,
 			RetryAttempts: 2,
+			TLSSkipVerify: true,
 		}
 	}
 	return AppConfig.Scan

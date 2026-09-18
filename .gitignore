@@ -14,5 +14,7 @@ Thumbs.db
 # Go
 vendor/
 
-# Config (may contain passwords)
+# Config and database (may contain passwords / local data)
 config.yaml
+*.db
+~/.bmcinv/

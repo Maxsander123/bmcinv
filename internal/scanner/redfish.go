@@ -105,6 +105,28 @@ type rfEthernetInterface struct {
 	Name          string          `json:"Name"`
 }
 
+// HPE SmartStorage types for iLO 4 (Gen8/Gen9).
+// iLO 4 uses a proprietary /SmartStorage/ path instead of standard /Storage/.
+// iLO 5+ supports both paths; we prefer standard and fall back to SmartStorage.
+type rfHPESmartStorage struct {
+	ArrayControllers rfLink `json:"ArrayControllers"`
+}
+
+type rfHPEDiskDrive struct {
+	CapacityMiB   int      `json:"CapacityMiB"`
+	MediaType     string   `json:"MediaType"`
+	InterfaceType string   `json:"InterfaceType"` // SAS, SATA, NVMe
+	Model         string   `json:"Model"`
+	SerialNumber  string   `json:"SerialNumber"`
+	Location      string   `json:"Location"`
+	Status        rfStatus `json:"Status"`
+	FirmwareVersion struct {
+		Current struct {
+			VersionString string `json:"VersionString"`
+		} `json:"Current"`
+	} `json:"FirmwareVersion"`
+}
+
 // --- HTTP helpers ---
 
 // getJSON performs an authenticated GET request and decodes the JSON response.
@@ -136,7 +158,14 @@ func getJSON(client *http.Client, url, username, password string, out interface{
 // --- Vendor detection ---
 
 // detectVendorHTTP probes the BMC's Redfish root endpoint to determine vendor.
-// It checks the Server header first, then falls back to response body inspection.
+// Detection order: Server HTTP header (most reliable) → response body keywords.
+//
+// Vendor mapping:
+//   Dell iDRAC 7+     → BMCTypeIDRAC
+//   HPE iLO 4+        → BMCTypeILO
+//   Supermicro X10+   → BMCTypeSupermicro
+//   ASUS ASMB / AMI   → BMCTypeIPMI  (shares IPMI credentials)
+//   MSI / unknown     → BMCTypeIPMI  (shares IPMI credentials)
 func detectVendorHTTP(ip string, client *http.Client) config.BMCType {
 	url := fmt.Sprintf("https://%s/redfish/v1/", ip)
 	resp, err := client.Get(url) //nolint:noctx
@@ -145,6 +174,7 @@ func detectVendorHTTP(ip string, client *http.Client) config.BMCType {
 	}
 	defer resp.Body.Close()
 
+	// Check HTTP Server header first — most reliable signal
 	serverHdr := strings.ToLower(resp.Header.Get("Server"))
 	switch {
 	case strings.Contains(serverHdr, "idrac"):
@@ -168,8 +198,16 @@ func detectVendorHTTP(ip string, client *http.Client) config.BMCType {
 		return config.BMCTypeIDRAC
 	case strings.Contains(bodyStr, "hewlett") || strings.Contains(bodyStr, "hpe") || strings.Contains(bodyStr, "ilo"):
 		return config.BMCTypeILO
+	case strings.Contains(bodyStr, "supermicro"):
+		return config.BMCTypeSupermicro
+	// ASUS ASMB and ASRock Rack BMCs typically identify as AMI or "ASUS" in their Redfish body.
+	// They share generic IPMI credentials in most environments.
+	case strings.Contains(bodyStr, "asus") || strings.Contains(bodyStr, "asrockrack") || strings.Contains(bodyStr, "asrock rack"):
+		return config.BMCTypeIPMI
+	// MSI server BMCs fall here too.
 	default:
-		// Any BMC that answers Redfish but whose vendor we can't identify is treated as IPMI-generic.
+		// Any BMC responding to Redfish v1 that we can't identify precisely
+		// gets IPMI credentials as the most common generic default.
 		return config.BMCTypeIPMI
 	}
 }
@@ -178,7 +216,9 @@ func detectVendorHTTP(ip string, client *http.Client) config.BMCType {
 
 // collectRedfishData fetches hardware inventory from the Redfish API.
 // It follows the standard Redfish v1 path: Systems → Memory / Storage / EthernetInterfaces.
-func collectRedfishData(ip string, cred config.Credential, client *http.Client) (*models.Server, error) {
+// For HPE iLO 4 (vendor == BMCTypeILO), storage falls back to the proprietary SmartStorage path
+// if the standard /Storage/ endpoint returns no drives.
+func collectRedfishData(ip string, vendor config.BMCType, cred config.Credential, client *http.Client) (*models.Server, error) {
 	base := fmt.Sprintf("https://%s", ip)
 	u, p := cred.Username, cred.Password
 
@@ -238,11 +278,15 @@ func collectRedfishData(ip string, cred config.Credential, client *http.Client) 
 	server.Memory = fetchMemory(client, base, memPath, u, p)
 
 	// 6. Storage controllers + drives (best-effort)
+	// HPE iLO 4 does not implement standard Redfish Storage; fall back to SmartStorage if empty.
 	storagePath := sys.Storage.OdataID
 	if storagePath == "" {
 		storagePath = sysPath + "/Storage"
 	}
 	server.Storage = fetchStorage(client, base, storagePath, u, p)
+	if len(server.Storage) == 0 && vendor == config.BMCTypeILO {
+		server.Storage = fetchStorageHPESmartStorage(client, base, sysPath, u, p)
+	}
 
 	// 7. Ethernet interfaces (best-effort)
 	ethPath := sys.EthernetInterfaces.OdataID
@@ -348,6 +392,53 @@ func fetchNetworks(client *http.Client, base, path, u, p string) []models.Networ
 			LinkSpeedMbps: iface.SpeedMbps,
 			Model:         iface.Name,
 		})
+	}
+	return result
+}
+
+// fetchStorageHPESmartStorage retrieves disk inventory via HPE's proprietary SmartStorage path.
+// Used as a fallback for iLO 4 (Gen8/Gen9) which does not implement standard Redfish /Storage/.
+// Path: /redfish/v1/Systems/{id}/SmartStorage/ArrayControllers/{n}/DiskDrives/
+func fetchStorageHPESmartStorage(client *http.Client, base, sysPath, u, p string) []models.Storage {
+	// Fetch SmartStorage root
+	var smartStorage rfHPESmartStorage
+	if err := getJSON(client, base+sysPath+"/SmartStorage/", u, p, &smartStorage); err != nil {
+		return nil
+	}
+	if smartStorage.ArrayControllers.OdataID == "" {
+		return nil
+	}
+
+	// Fetch array controller list
+	var controllers rfCollection
+	if err := getJSON(client, base+smartStorage.ArrayControllers.OdataID, u, p, &controllers); err != nil {
+		return nil
+	}
+
+	var result []models.Storage
+	for _, ctrlLink := range controllers.Members {
+		// Each controller has a DiskDrives sub-collection
+		drivesURL := base + ctrlLink.OdataID + "DiskDrives/"
+		var drives rfCollection
+		if err := getJSON(client, drivesURL, u, p, &drives); err != nil {
+			continue
+		}
+		for i, driveLink := range drives.Members {
+			var drive rfHPEDiskDrive
+			if err := getJSON(client, base+driveLink.OdataID, u, p, &drive); err != nil {
+				continue
+			}
+			result = append(result, models.Storage{
+				Slot:         fmt.Sprintf("Bay %d", i+1),
+				MediaType:    drive.MediaType,
+				Protocol:     drive.InterfaceType,
+				CapacityGB:   drive.CapacityMiB / 1024,
+				Model:        drive.Model,
+				SerialNumber: strings.TrimSpace(drive.SerialNumber),
+				FirmwareRev:  drive.FirmwareVersion.Current.VersionString,
+				Health:       healthOrOK(drive.Status.Health),
+			})
+		}
 	}
 	return result
 }

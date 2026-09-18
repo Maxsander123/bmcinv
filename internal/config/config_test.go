@@ -122,17 +122,35 @@ func TestDatabasePath_Default(t *testing.T) {
 }
 
 func TestBMCTypeConstants(t *testing.T) {
-	if string(BMCTypeIDRAC) != "idrac" {
-		t.Errorf("BMCTypeIDRAC = %q, want idrac", BMCTypeIDRAC)
+	cases := []struct {
+		got  BMCType
+		want string
+	}{
+		{BMCTypeIDRAC, "idrac"},
+		{BMCTypeILO, "ilo"},
+		{BMCTypeIPMI, "ipmi"},
+		{BMCTypeSupermicro, "supermicro"},
+		{BMCTypeUnknown, "unknown"},
 	}
-	if string(BMCTypeILO) != "ilo" {
-		t.Errorf("BMCTypeILO = %q, want ilo", BMCTypeILO)
+	for _, tc := range cases {
+		if string(tc.got) != tc.want {
+			t.Errorf("BMCType constant = %q, want %q", tc.got, tc.want)
+		}
 	}
-	if string(BMCTypeIPMI) != "ipmi" {
-		t.Errorf("BMCTypeIPMI = %q, want ipmi", BMCTypeIPMI)
+}
+
+func TestGetCredential_Supermicro(t *testing.T) {
+	AppConfig = &Config{
+		Credentials: map[string]Credential{
+			"supermicro": {Username: "ADMIN", Password: "ADMIN"},
+		},
 	}
-	if string(BMCTypeUnknown) != "unknown" {
-		t.Errorf("BMCTypeUnknown = %q, want unknown", BMCTypeUnknown)
+	cred, err := GetCredential(BMCTypeSupermicro)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cred.Username != "ADMIN" {
+		t.Errorf("username = %q, want ADMIN", cred.Username)
 	}
 }
 

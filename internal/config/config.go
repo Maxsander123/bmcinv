@@ -21,10 +21,11 @@ import (
 type BMCType string
 
 const (
-	BMCTypeIDRAC   BMCType = "idrac"
-	BMCTypeILO     BMCType = "ilo"
-	BMCTypeIPMI    BMCType = "ipmi"
-	BMCTypeUnknown BMCType = "unknown"
+	BMCTypeIDRAC       BMCType = "idrac"       // Dell iDRAC (PowerEdge)
+	BMCTypeILO         BMCType = "ilo"         // HPE iLO (ProLiant)
+	BMCTypeIPMI        BMCType = "ipmi"        // Generic IPMI / Redfish (ASUS, MSI, unknown)
+	BMCTypeSupermicro  BMCType = "supermicro"  // Supermicro IPMI / Redfish
+	BMCTypeUnknown     BMCType = "unknown"
 )
 
 // Credential holds authentication data for a specific BMC type
@@ -126,6 +127,8 @@ func setDefaults() {
 	viper.SetDefault("credentials.idrac.password", "calvin")
 	viper.SetDefault("credentials.ilo.username", "Administrator")
 	viper.SetDefault("credentials.ilo.password", "")
+	viper.SetDefault("credentials.supermicro.username", "ADMIN")
+	viper.SetDefault("credentials.supermicro.password", "ADMIN")
 	viper.SetDefault("credentials.ipmi.username", "ADMIN")
 	viper.SetDefault("credentials.ipmi.password", "ADMIN")
 
@@ -145,12 +148,14 @@ func bindEnvVars() {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
-	_ = viper.BindEnv("credentials.idrac.password", "BMCINV_IDRAC_PASSWORD")
-	_ = viper.BindEnv("credentials.ilo.password", "BMCINV_ILO_PASSWORD")
-	_ = viper.BindEnv("credentials.ipmi.password", "BMCINV_IPMI_PASSWORD")
 	_ = viper.BindEnv("credentials.idrac.username", "BMCINV_IDRAC_USERNAME")
+	_ = viper.BindEnv("credentials.idrac.password", "BMCINV_IDRAC_PASSWORD")
 	_ = viper.BindEnv("credentials.ilo.username", "BMCINV_ILO_USERNAME")
+	_ = viper.BindEnv("credentials.ilo.password", "BMCINV_ILO_PASSWORD")
+	_ = viper.BindEnv("credentials.supermicro.username", "BMCINV_SUPERMICRO_USERNAME")
+	_ = viper.BindEnv("credentials.supermicro.password", "BMCINV_SUPERMICRO_PASSWORD")
 	_ = viper.BindEnv("credentials.ipmi.username", "BMCINV_IPMI_USERNAME")
+	_ = viper.BindEnv("credentials.ipmi.password", "BMCINV_IPMI_PASSWORD")
 }
 
 // applyEnvPasswords overrides credential passwords from environment variables
@@ -165,9 +170,10 @@ func applyEnvPasswords() {
 	}
 
 	envMap := map[string][2]string{
-		"idrac": {"BMCINV_IDRAC_USERNAME", "BMCINV_IDRAC_PASSWORD"},
-		"ilo":   {"BMCINV_ILO_USERNAME", "BMCINV_ILO_PASSWORD"},
-		"ipmi":  {"BMCINV_IPMI_USERNAME", "BMCINV_IPMI_PASSWORD"},
+		"idrac":      {"BMCINV_IDRAC_USERNAME", "BMCINV_IDRAC_PASSWORD"},
+		"ilo":        {"BMCINV_ILO_USERNAME", "BMCINV_ILO_PASSWORD"},
+		"supermicro": {"BMCINV_SUPERMICRO_USERNAME", "BMCINV_SUPERMICRO_PASSWORD"},
+		"ipmi":       {"BMCINV_IPMI_USERNAME", "BMCINV_IPMI_PASSWORD"},
 	}
 
 	for key, vars := range envMap {
@@ -187,18 +193,22 @@ func createDefaultConfig() error {
 	configContent := `# BMC Inventory Configuration
 #
 # SECURITY: Store passwords via environment variables instead of this file:
-#   export BMCINV_IDRAC_PASSWORD="yourpassword"
-#   export BMCINV_ILO_PASSWORD="yourpassword"
-#   export BMCINV_IPMI_PASSWORD="yourpassword"
+#   export BMCINV_IDRAC_PASSWORD="yourpassword"     # Dell iDRAC
+#   export BMCINV_ILO_PASSWORD="yourpassword"       # HPE iLO
+#   export BMCINV_SUPERMICRO_PASSWORD="yourpassword" # Supermicro
+#   export BMCINV_IPMI_PASSWORD="yourpassword"      # Generic IPMI / ASUS / MSI
 
 credentials:
-  idrac:
+  idrac:        # Dell PowerEdge (iDRAC 7+)
     username: root
-    password: ""  # prefer BMCINV_IDRAC_PASSWORD env var
-  ilo:
+    password: ""  # default: calvin — prefer BMCINV_IDRAC_PASSWORD env var
+  ilo:          # HPE ProLiant (iLO 4+)
     username: Administrator
     password: ""  # prefer BMCINV_ILO_PASSWORD env var
-  ipmi:
+  supermicro:   # Supermicro (X10/X11/X12/H12/H13)
+    username: ADMIN
+    password: ""  # default: ADMIN — prefer BMCINV_SUPERMICRO_PASSWORD env var
+  ipmi:         # Generic Redfish/IPMI fallback (ASUS ASMB, MSI, unknown vendors)
     username: ADMIN
     password: ""  # prefer BMCINV_IPMI_PASSWORD env var
 

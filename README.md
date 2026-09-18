@@ -37,8 +37,8 @@
 
 ## Features
 
-- **Echte Redfish API** – Fragt iDRAC 7+, iLO 4+, und generische Redfish-v1-BMCs ab
-- **Automatische Vendor-Erkennung** – Erkennt Dell / HPE / Generic ohne manuelle Angabe
+- **Echte Redfish API** – Fragt iDRAC 7+, iLO 4+, Supermicro X10+, ASUS ASMB und generische BMCs ab
+- **Automatische Vendor-Erkennung** – Erkennt Dell / HPE / Supermicro / ASUS / MSI ohne manuelle Angabe
 - **Paralleles Scanning** – Konfigurierbarer Worker-Pool für schnelles Scannen ganzer IP-Bereiche
 - **Smart Credentials** – Separate Passwörter pro BMC-Typ; Übergabe via Env-Variable möglich
 - **Lokaler SQLite-Cache** – Suchen laufen in Millisekunden, ohne Netzwerk
@@ -419,13 +419,16 @@ Die sicherste Methode — die Config-Datei enthält dann keine sensiblen Daten:
 
 ```bash
 export BMCINV_IDRAC_USERNAME="root"
-export BMCINV_IDRAC_PASSWORD="meinDellPasswort"
+export BMCINV_IDRAC_PASSWORD="meinDellPasswort"       # Dell iDRAC
 
 export BMCINV_ILO_USERNAME="Administrator"
-export BMCINV_ILO_PASSWORD="meinHPEPasswort"
+export BMCINV_ILO_PASSWORD="meinHPEPasswort"          # HPE iLO
+
+export BMCINV_SUPERMICRO_USERNAME="ADMIN"
+export BMCINV_SUPERMICRO_PASSWORD="meinSMCPasswort"   # Supermicro
 
 export BMCINV_IPMI_USERNAME="ADMIN"
-export BMCINV_IPMI_PASSWORD="meinIPMIPasswort"
+export BMCINV_IPMI_PASSWORD="meinPasswort"            # ASUS / MSI / unbekannte BMCs
 ```
 
 Env-Variablen haben Vorrang vor der Config-Datei. In CI/CD-Systemen können diese als Secrets gesetzt werden.
@@ -438,13 +441,16 @@ Env-Variablen haben Vorrang vor der Config-Datei. In CI/CD-Systemen können dies
 # Credentials für verschiedene BMC-Typen
 # Tipp: Passwörter lieber via Umgebungsvariablen setzen (s. oben)
 credentials:
-  idrac:
+  idrac:          # Dell PowerEdge (iDRAC 7+)
     username: root
-    password: ""          # oder: BMCINV_IDRAC_PASSWORD
-  ilo:
+    password: ""          # default: calvin — oder BMCINV_IDRAC_PASSWORD
+  ilo:            # HPE ProLiant (iLO 4+)
     username: Administrator
     password: ""          # oder: BMCINV_ILO_PASSWORD
-  ipmi:
+  supermicro:     # Supermicro (X10/X11/X12/H12/H13)
+    username: ADMIN
+    password: ""          # default: ADMIN — oder BMCINV_SUPERMICRO_PASSWORD
+  ipmi:           # Generisch: ASUS ASMB, MSI, unbekannte BMCs
     username: ADMIN
     password: ""          # oder: BMCINV_IPMI_PASSWORD
 
@@ -516,14 +522,18 @@ GET https://<ip>/redfish/v1/
 
 Anhand von HTTP-Response-Header (`Server:`) und Response-Body wird der BMC-Typ erkannt:
 
-| Erkennungsmerkmal | Vendor |
-|-------------------|--------|
-| `Server: iDRAC/9 …` im Header | Dell iDRAC |
-| `Server: iLO/5 …` im Header | HPE iLO |
-| `"Dell"` oder `"iDRAC"` im Response-Body | Dell iDRAC |
-| `"Hewlett"`, `"HPE"` oder `"iLO"` im Body | HPE iLO |
-| Antwort vorhanden, Vendor unbekannt | Generisches IPMI/Redfish |
-| Keine Antwort / Timeout | Host übersprungen |
+| Erkennungsmerkmal | Vendor | Credential-Typ |
+|-------------------|--------|----------------|
+| `Server: iDRAC/…` im HTTP-Header | Dell iDRAC | `idrac` |
+| `Server: iLO/…` im HTTP-Header | HPE iLO | `ilo` |
+| `"Dell"` / `"iDRAC"` im Response-Body | Dell iDRAC | `idrac` |
+| `"Hewlett"` / `"HPE"` / `"iLO"` im Body | HPE iLO | `ilo` |
+| `"Supermicro"` im Body | Supermicro | `supermicro` |
+| `"ASUS"` / `"ASRockRack"` im Body | ASUS / ASRock Rack | `ipmi` |
+| Antwort vorhanden, Vendor unbekannt (MSI usw.) | Generisch | `ipmi` |
+| Keine Antwort / Timeout | – | übersprungen |
+
+**HPE iLO 4 (Gen8/Gen9)**: iLO 4 implementiert kein Standard-Redfish-Storage. Das Tool erkennt leere Ergebnisse und fällt automatisch auf den proprietären HPE SmartStorage-Pfad zurück (`/SmartStorage/ArrayControllers/`). iLO 5+ (Gen10+) nutzt den Standard-Pfad.
 
 Erst nach der Erkennung werden die passenden Credentials geladen und authenticated Requests gesendet.
 

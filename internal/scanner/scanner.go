@@ -129,7 +129,7 @@ func (s *Scanner) scanHost(ip string) ScanResult {
 	var server *models.Server
 	var lastErr error
 	for attempt := 0; attempt <= s.retries; attempt++ {
-		server, err = collectRedfishData(ip, cred, s.httpClient)
+		server, err = collectRedfishData(ip, vendor, cred, s.httpClient)
 		if err == nil {
 			break
 		}

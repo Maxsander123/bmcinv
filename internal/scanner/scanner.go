@@ -30,8 +30,6 @@ type Scanner struct {
 	workers    int
 	timeout    time.Duration
 	retries    int
-	results    chan ScanResult
-	wg         sync.WaitGroup
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	httpClient *http.Client
@@ -47,7 +45,6 @@ func NewScanner() *Scanner {
 		workers:    cfg.Workers,
 		timeout:    timeout,
 		retries:    cfg.RetryAttempts,
-		results:    make(chan ScanResult, 100),
 		ctx:        ctx,
 		cancelFunc: cancel,
 		httpClient: newHTTPClient(timeout, cfg.TLSSkipVerify),
@@ -56,6 +53,7 @@ func NewScanner() *Scanner {
 
 // ScanCIDR scans all IPs in a CIDR range using a worker pool.
 // Workflow: parse CIDR → fan-out to workers via jobs channel → fan-in results.
+// Each call creates its own result channel so ScanCIDR is safe to call repeatedly.
 func (s *Scanner) ScanCIDR(cidr string) ([]ScanResult, error) {
 	ips, err := expandCIDR(cidr)
 	if err != nil {
@@ -65,11 +63,24 @@ func (s *Scanner) ScanCIDR(cidr string) ([]ScanResult, error) {
 		return nil, fmt.Errorf("no IPs in range")
 	}
 
+	// Fresh channel per invocation — closing it at end of this call is safe.
+	results := make(chan ScanResult, len(ips))
 	jobs := make(chan string, len(ips))
 
+	var wg sync.WaitGroup
 	for i := 0; i < s.workers; i++ {
-		s.wg.Add(1)
-		go s.worker(jobs)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ip := range jobs {
+				select {
+				case <-s.ctx.Done():
+					return
+				default:
+					results <- s.scanHost(ip)
+				}
+			}
+		}()
 	}
 
 	go func() {
@@ -83,36 +94,16 @@ func (s *Scanner) ScanCIDR(cidr string) ([]ScanResult, error) {
 		close(jobs)
 	}()
 
-	var results []ScanResult
-	done := make(chan struct{})
-
 	go func() {
-		s.wg.Wait()
-		close(s.results)
+		wg.Wait()
+		close(results)
 	}()
 
-	go func() {
-		for result := range s.results {
-			results = append(results, result)
-		}
-		close(done)
-	}()
-
-	<-done
-	return results, nil
-}
-
-// worker processes IPs from the jobs channel
-func (s *Scanner) worker(jobs <-chan string) {
-	defer s.wg.Done()
-	for ip := range jobs {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-			s.results <- s.scanHost(ip)
-		}
+	var out []ScanResult
+	for r := range results {
+		out = append(out, r)
 	}
+	return out, nil
 }
 
 // scanHost performs the complete scan workflow for a single IP:
@@ -143,7 +134,13 @@ func (s *Scanner) scanHost(ip string) ScanResult {
 			break
 		}
 		lastErr = err
-		time.Sleep(time.Duration(attempt+1) * time.Second)
+		// Context-aware backoff: don't block on sleep when cancellation is requested.
+		select {
+		case <-s.ctx.Done():
+			result.Error = fmt.Errorf("scan cancelled")
+			return result
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
 	}
 	if server == nil {
 		result.Error = fmt.Errorf("data collection failed after %d attempts: %w", s.retries+1, lastErr)
